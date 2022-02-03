@@ -1,4 +1,5 @@
 import math
+from turtle import forward
 
 import torch
 import torch.nn as nn
@@ -112,3 +113,100 @@ class Transformer(nn.Module):
             inputs = self.SAs[i](inputs, inputs, inputs, transformer_mask)
             inputs = self.FFNs[i](inputs, transformer_mask)
         return inputs[out_mask].view((batch_size, label_len, -1))
+
+
+class ContextAttention(nn.Module):
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        input_layers=1,
+        context_layers=1,
+        context_type='conv',    # conv, mlp
+        norm='none',
+        input_drop=0.0,
+        dropout=0.0
+    ):
+        super(ContextAttention, self).__init__()
+        self.input_layers = input_layers
+        self.context_layers = context_layers
+        
+        self.inputs = nn.ModuleList()
+        self.contexts = nn.ModuleList()
+        if norm != 'none':
+            self.inputs_norms = nn.ModuleList()
+            self.context_norms = nn.ModuelList()
+        
+        for i in range(input_layers):
+            in_hidden = hidden_size if i > 0 else input_size
+            out_hidden = hidden_size
+            self.inputs.append(nn.Linear(in_hidden, out_hidden)) 
+            if i < input_layers - 1:
+                if norm == 'batch':
+                    self.inputs_norms.append(nn.BatchNorm1d(out_hidden))
+                elif norm == 'layer':
+                    self.inputs_norms.append(nn.LayerNorm(out_hidden))
+                else:
+                    self.inputs_norms = None
+
+        for i in range(context_layers):
+            in_hidden = hidden_size if i > 0 else input_size
+            out_hidden = hidden_size
+            if context_type == 'conv':
+                self.contexts.append(nn.Conv1d(in_hidden, out_hidden, 1, 1))
+            else:
+                self.contexts.append(nn.Linear(in_hidden, out_hidden))
+            if i < context_layers - 1:
+                if norm == 'batch':
+                    self.context_norms.append(nn.BatchNorm1d(out_hidden))
+                elif norm == 'layer':
+                    self.context_norms.append(nn.LayerNorm(out_hidden))
+                else:
+                    self.context_norms = None
+        
+        self.V = nn.Parameter(torch.FloatTensor(hidden_size), requires_grad=True)
+        nn.init.xavier_uniform_(self.V)
+
+        self._mask = nn.Parameter(torch.FloatTensor([float['-inf']]), requires_grad=False)
+        self._tanh = nn.Tanh()
+        self._softmax = nn.Softmax()
+
+        self.input_drop = nn.Dropout(input_drop)
+        self.dropout = nn.Dropout(dropout)
+
+    def set_mask(self, mask_size):
+        self.mask = self._mask.unsqueeze(1).expand(*mask_size)
+
+    def forward(self, inputs, contexts, mask):
+        """
+        mask: Byte tensor: selection mask
+        """
+        inputs = self.input_drop(inputs)
+
+        for i in range(self.input_layers):
+            inputs = self.inputs[i](inputs)
+            if i < self.input_layers - 1:
+                if self.inputs_norms:
+                    inputs = self.inputs_norms[i](inputs)
+            inputs = self.dropout(inputs)
+        
+        inputs = inputs.unsqueeze(2).expand(-1, -1, contexts.size(1))    # (batch, hidden_dim, seq_len)
+        contexts = contexts.permute(0, 2, 1)  # (batch, hidden_dim, seq_len)
+        
+        for i in range(self.context_layers):
+            contexts = self.contexts[i](contexts)
+            if i < self.context_layers - 1:
+                if self.context_norms:
+                    contexts = self.context_norms[i](contexts)
+            contexts = self.dropout(contexts)
+
+        V = self.V.unsqueeze(0).expand(contexts.size(0), -1).unsqueeze(1)    # (batch, 1, hidden_dim)
+        att = torch.bmm(V, self._tanh(inputs + contexts)).squeeze(1)  # (batch, seq_len)
+        if att[mask].size(1) > 0:
+            att[mask] = self.mask(mask)
+        score = self._softmax(att)
+        hidden = torch.bmm(contexts, score.unsqueeze(2)).squeeze(2)
+
+        return hidden, score
+
+
