@@ -1,21 +1,20 @@
 from argparse import ArgumentParser
 
 
-def get_exp_configure(args):
-    dataset_list = {'tmall': {}, 'alipay': {}, 'taobao': {}}
-    model_list = ['LSTM', 'GRU']
+def get_exp_configure(args, datasets, model_list):
+    dataset_list = {_: {} for _ in datasets}
     for dataset in dataset_list.keys():
         for model in model_list:
             dataset_list[dataset][model] = {
                 'embed_size': 48,
                 'hidden_size': 64,
                 'output_size': 1,
-                'batch_size': 250,
+                'batch_size': 256,
                 'dropout_rate': 0.5,
                 'decay_step': 1000,
                 'min_lr': 1e-5,
-                'l2_reg': 4e-5,
-                'predict_hidden_sizes': [256, 64, 16],
+                'l2_reg': 1e-4,
+                'predict_hidden_sizes': [256, 64, 16]
             }
     return dataset_list[args['dataset']][args['model']]
 
@@ -24,13 +23,12 @@ def get_options(parser: ArgumentParser, reset_args=None):
     from torch import device
     if reset_args is None:
         reset_args = {}
-    parser.add_argument('-d', '--dataset', type=str,
-                        choices=['tmall', 'alipay', 'taobao'],
-                        default='tmall', help='Dataset use')
-    parser.add_argument('-m', '--model', type=str,
-                        choices=['LSTM', 'GRU', ],
-                        default='LSTM', help='Model use'
-                        )
+    datasets = ['tmall', 'alipay', 'taobao']
+    models = ['LSTM', 'GRU', 'DIN', 'DIEN', 'Pointer']
+    parser.add_argument('-d', '--dataset', type=str, choices=datasets, default='tmall', help='Dataset use')
+    parser.add_argument('-m', '--model', type=str, choices=models, default='LSTM', help='Model use')
+    parser.add_argument('-l', '--loss_type', type=int, choices=[0, 1, 2], default=0,
+                        help='0 is BCELoss; 1 is NLLLoss; 2 is PairLoss')
     parser.add_argument('--data_dir', type=str, default='./Data')
     parser.add_argument('--save_dir', type=str, default='./SavedModels')
     parser.add_argument('--load_model', action='store_true', default=False)
@@ -46,7 +44,7 @@ def get_options(parser: ArgumentParser, reset_args=None):
     args = parser.parse_args().__dict__
     # Get experiment configuration
     args['exp_name'] = '_'.join([args['model'], args['dataset'], args['postfix']])
-    args.update(get_exp_configure(args))
+    args.update(get_exp_configure(args, datasets, models))
 
     device_name = 'cpu' if args['cuda'] < 0 else 'cuda:{}'.format(args['cuda'])
     args['device'] = device(device_name)

@@ -24,13 +24,18 @@ class SimpleDataset(data.Dataset):
     def __getitem__(self, user):
         logs = self.user_log[user][self.item_loc * self.set_or_seq_len:
                                    (self.item_loc + 2) * self.set_or_seq_len]
-        return logs[:, :-2], logs[logs.shape[0] // 2:, -1]
+        return logs[:, :-2], logs[self.set_or_seq_len:, -1]
 
 
-def collate_fn(data_):
-    data_.sort(key=lambda _: len(_[0]), reverse=True)
-    logs = torch.tensor(np.stack([_[0] for _ in data_], axis=0))
+def collate_fn_point(data_):
+    logs = torch.tensor(np.stack([_[0] for _ in data_]))
     labels = torch.tensor(np.stack([_[1] for _ in data_]), dtype=torch.float32)
+    return logs, labels
+
+
+def collate_fn_seq(data_):
+    logs, labels = collate_fn_point(data_)
+    labels = torch.argsort(-labels)
     return logs, labels
 
 
@@ -40,16 +45,14 @@ if __name__ == '__main__':
     dataset = '../Data/alipay'
     train_data = SimpleDataset(np.load(os.path.join(dataset, 'user_item.npz')), mode='train')
     train_dataloader = data.DataLoader(train_data, batch_size=20,
-                                       num_workers=4, collate_fn=collate_fn, shuffle=True)
-    i = 0
+                                       num_workers=4, shuffle=True)
     t1_ = t1 = time.perf_counter()
     network_time = 0
     print(train_data.fields_num)
-    for X, Y in train_dataloader:
-        network_time += time.perf_counter() - t1_
-        i += 1
+    for i, (X, Y) in enumerate(train_dataloader):
         if i > 2:
             break
+        network_time += time.perf_counter() - t1_
         print(X, X.shape)
         print(Y)
         t1_ = time.perf_counter()
