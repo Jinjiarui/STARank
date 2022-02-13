@@ -3,7 +3,7 @@ import random
 import numpy as np
 import torch
 
-from Script.PredictModel import SeqBasedModel
+from Script.PredictModel import SeqBasedModel, PointBaseModel
 
 
 def set_random_seed(seed):
@@ -28,9 +28,17 @@ def load_model(args):
             dropout_rate=args['dropout_rate'],
             model_name=args['model']
         )
+    elif args['model'] in ['FM', 'DeepFM', 'PNN']:
+        model = PointBaseModel(
+            input_size=args['input_size'],
+            embed_size=args['embed_size'],
+            predict_hidden_sizes=args['predict_hidden_sizes'],
+            output_size=args['output_size'],
+            dropout_rate=args['dropout_rate'],
+            model_name=args['model']
+        )
     else:
-        print("Model {} is not listed!".format(args['model']))
-        raise AttributeError
+        raise NotImplementedError
     return model
 
 
@@ -49,6 +57,7 @@ class Evaluate:
         self.evaluate_lens -= 1
 
     def evaluate(self, y_, y, with_loss=False):
+        # print(y_)
         loss = self.criterion(y_.view(y.numel(), -1).squeeze(), y.view(-1)) if with_loss else None
         y_, y = [_.detach().cpu().numpy() for _ in [y_, y]]
         if self.mode == 0:  # this case is 0-1 label

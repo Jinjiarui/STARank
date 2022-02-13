@@ -84,6 +84,7 @@ def main(args: dict):
                 eval_list[0].append(deepcopy(y))
                 eval_list[1].append(deepcopy(y_))
         eval_list = [torch.cat(_) for _ in eval_list]
+        print(eval_list)
         loss, ndcgs, maps = eva.evaluate(eval_list[1], eval_list[0], True)
         print("Validate loss:{:.4f} ndcg3:{:.4f} ndcg5:{:.4f} map3:{:.4f} map5:{:.4f}"
               .format(loss, ndcgs[0], ndcgs[1], maps[0], maps[1]))
@@ -102,6 +103,7 @@ def main(args: dict):
             eval_list[0].append(deepcopy(y))
             eval_list[1].append(deepcopy(y_))
     eval_list = [torch.cat(_) for _ in eval_list]
+    print(eval_list)
     loss, ndcgs, maps = eva.evaluate(eval_list[1], eval_list[0], True)
     print("Test loss:{:.4f} ndcg3:{:.4f} ndcg5:{:.4f} map3:{:.4f} map5:{:.4f}"
           .format(loss, ndcgs[0], ndcgs[1], maps[0], maps[1]))

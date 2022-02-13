@@ -115,7 +115,7 @@ class Transformer(nn.Module):
 
 
 class PointerNetWork(nn.Module):
-    def __init__(self, input_size, weight_size, hidden_size, allow_repeat=False):
+    def __init__(self, input_size, weight_size, hidden_size, dropout, allow_repeat=False):
         super(PointerNetWork, self).__init__()
         self.allow_repeat = allow_repeat
 
@@ -339,3 +339,57 @@ class ContextAttention(nn.Module):
         hidden = torch.bmm(contexts, score.unsqueeze(2)).squeeze(2)
 
         return hidden, score
+
+
+class FMLayer(nn.Module):
+    def __init__(self, n, k, w1=None, v=None, point_wise=True):
+        super(FMLayer, self).__init__()
+        self.point_wise = point_wise
+        self.W1 = w1  # 前两项线性层
+        self.V = v  # 交互矩阵
+        if self.W1 is None:
+            self.W1 = nn.Embedding(n, 1)
+        if self.V is None:
+            self.V = nn.Embedding(n, k)
+        self.W0 = nn.Parameter(torch.randn(size=(1,), requires_grad=True))
+
+    def forward(self, inputs):
+        # inputs: (B, ..., F), Fis the num of fields
+        linear_part = torch.sum(self.W1(inputs), dim=-2) + self.W0  # (B, ..., 1)
+        x = self.V(inputs)  # (B, ..., F, K)
+        interaction_part_1 = torch.pow(torch.sum(x, -2), 2)  # (B, K)
+        interaction_part_2 = torch.sum(torch.pow(x, 2), -2)
+        product_part = interaction_part_1 - interaction_part_2
+        if self.point_wise:
+            product_part = torch.sum(product_part, -1, keepdim=True)  # (B, ..., 1)
+        output = linear_part + 0.5 * product_part
+        return output
+
+
+class DeepFM(nn.Module):
+    def __init__(self, w1, v, deep):
+        super(DeepFM, self).__init__()
+        self.fm = FMLayer(0, 0, w1, v, point_wise=True)
+        self.deep = deep
+        self.v = v
+
+    def forward(self, inputs):
+        embed_inputs = torch.sum(self.v(inputs), -2)
+        return self.fm(inputs) + self.deep(embed_inputs)
+
+
+class PNN(nn.Module):
+    def __init__(self, w1, v, k):
+        super(PNN, self).__init__()
+        self.fm = FMLayer(0, 0, w1, v, point_wise=False)
+        self.v = v
+        self.ln = nn.Linear(k * 2, k)
+
+    def forward(self, inputs):
+        embed_inputs = torch.sum(self.v(inputs), -2)
+        fm_inputs = self.fm(inputs)
+        embed_sqrt_mean = torch.sqrt(torch.sum(embed_inputs ** 2, dim=-1, keepdim=True).clamp_min(1e-9))
+        fm_sqrt_mean = torch.sqrt(torch.sum(fm_inputs ** 2, dim=-1, keepdim=True).clamp_min(1e-9))
+        fm_inputs = fm_inputs / fm_sqrt_mean * embed_sqrt_mean
+        outputs = torch.concat([fm_inputs, embed_inputs], dim=-1)
+        return self.ln(outputs)

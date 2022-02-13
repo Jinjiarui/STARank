@@ -24,7 +24,9 @@ class SimpleDataset(data.Dataset):
     def __getitem__(self, user):
         logs = self.user_log[user][self.item_loc * self.set_or_seq_len:
                                    (self.item_loc + 2) * self.set_or_seq_len]
-        return logs[:, :-2], logs[self.set_or_seq_len:, -1]
+        x, y = logs[:, :-2], logs[self.set_or_seq_len:, -1]
+        r = np.random.permutation(self.set_or_seq_len)
+        return x, y, r
 
 
 def collate_fn_point(data_):
@@ -35,7 +37,11 @@ def collate_fn_point(data_):
 
 def collate_fn_seq(data_):
     logs, labels = collate_fn_point(data_)
-    labels = torch.argsort(-labels)
+    random_seq = torch.tensor(np.stack([_[-1] for _ in data_]))
+    labels = torch.argsort(-labels, dim=-1)
+    labels = torch.gather(labels, 1, random_seq)
+    logs[:, labels.size(1):] = torch.gather(logs[:, labels.size(1):], 1,
+                                             random_seq.unsqueeze(-1).expand(-1, -1, logs.size(-1)))
     return logs, labels
 
 

@@ -24,7 +24,7 @@ def get_options(parser: ArgumentParser, reset_args=None):
     if reset_args is None:
         reset_args = {}
     datasets = ['tmall', 'alipay', 'taobao']
-    models = ['LSTM', 'GRU', 'DIN', 'DIEN', 'Pointer']
+    models = ['LSTM', 'GRU', 'DIN', 'DIEN', 'Pointer', 'FM', 'DeepFM', 'PNN']
     parser.add_argument('-d', '--dataset', type=str, choices=datasets, default='tmall', help='Dataset use')
     parser.add_argument('-m', '--model', type=str, choices=models, default='LSTM', help='Model use')
     parser.add_argument('-l', '--loss_type', type=int, choices=[0, 1, 2], default=0,

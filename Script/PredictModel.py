@@ -2,7 +2,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from Script.BackModels import PredictMLP, PointerNetWork, DIN, DIEN, MultiHeadedAttention, ContextAttention
+from Script.BackModels import PredictMLP, PointerNetWork, DIN, DIEN, MultiHeadedAttention, ContextAttention, FMLayer, \
+    DeepFM, PNN
 
 
 class BaseModel(nn.Module):
@@ -17,6 +18,36 @@ class BaseModel(nn.Module):
         self.hidden_size = hidden_size
         self.model = model
         self.embedding_layer = nn.Embedding(input_size, embed_size)
+
+
+class PointBaseModel(BaseModel):
+    def __init__(self,
+                 input_size,
+                 embed_size,
+                 predict_hidden_sizes,
+                 output_size=1,
+                 dropout_rate=0.5,
+                 model_name='PNN',
+                 ):
+        super(PointBaseModel, self).__init__(input_size, embed_size, 0, model_name)
+        self.dropout = nn.Dropout(dropout_rate)
+        self.mlp = PredictMLP(embed_size, predict_hidden_sizes, output_size, self.dropout)
+        self.requires_mlp = True
+        w1 = nn.Embedding(input_size, 1)
+        if model_name == 'FM':
+            self.model = FMLayer(0, 0, w1, self.embedding_layer, point_wise=False)
+        elif model_name == 'DeepFM':
+            self.model = DeepFM(w1, self.embedding_layer, self.mlp)
+            self.requires_mlp = False
+        elif model_name == 'PNN':
+            self.model = PNN(w1, self.embedding_layer, embed_size)
+
+    def forward(self, inputs):
+        _, x = torch.split(inputs, dim=1, split_size_or_sections=inputs.size(1) // 2)  # Both (B, L, E)
+        x = self.model(x)
+        if self.requires_mlp:
+            x = self.mlp(x)
+        return x.squeeze().sigmoid()
 
 
 class SeqBasedModel(BaseModel):
@@ -49,12 +80,12 @@ class SeqBasedModel(BaseModel):
             self.use_last = False
         elif model_name == 'Pointer':
             self.enc = nn.LSTM(embed_size, hidden_size, batch_first=True)
-            self.dec = PointerNetWork(embed_size, hidden_size, hidden_size)
+            self.dec = PointerNetWork(embed_size, hidden_size, hidden_size, self.dropout)
             self.sub_forward = self.forward_2
         else:
             raise NotImplemented
 
-    def forward_1(self, targets, history):
+    def forward_1(self, history, targets):
         history_state = self.enc(history)  # (B, H)
         if isinstance(history_state, tuple):
             history_state = history_state[-1 if self.use_last else 0]
@@ -64,13 +95,13 @@ class SeqBasedModel(BaseModel):
             target_state = self.dec(target[:, None], history_state)  # Input is (B, 1, E)
             if isinstance(target_state, tuple):
                 target_state, _ = target_state
-            target_states.append(target_state)
+            target_states.append(target_state.squeeze())
         target_states = torch.stack(target_states, dim=1)  # (B, L, H)
         target_states = self.mlp(target_states).squeeze()  # (B, L)
         target_states = torch.sigmoid(target_states)
         return target_states
 
-    def forward_2(self, targets, history):
+    def forward_2(self, history, targets):
         _, history_state = self.enc(history)  # (B, H)
         history_state = [_.squeeze(0) for _ in history_state]
         target_states = self.dec(targets, history_state)  # (B, L, L)
@@ -78,7 +109,7 @@ class SeqBasedModel(BaseModel):
 
     def forward(self, x):
         # X : (B, 2*L, fields)
-        x = torch.mean(self.embedding_layer(x), dim=-2)  # (B, 2*L, E)
+        x = torch.sum(self.embedding_layer(x), dim=-2)  # (B, 2*L, E)
         history, targets = torch.split(x, dim=1, split_size_or_sections=x.size(1) // 2)  # Both (B, L, E)
         return self.sub_forward(history, targets)
 
