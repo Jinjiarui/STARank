@@ -30,7 +30,7 @@ def main(args: dict):
     click_model = None
     if args['click_model'] != '':
         click_model = np.load(os.path.join(args['data_dir'], 'ClickModel', '{}.npy'.format(args['click_model'])))
-    dataset = SimpleDataset(user_item, mode='train', click_model=click_model)
+    dataset = SimpleDataset(user_item, mode='train', click_model=click_model, ratio=args['ratio'])
     collate_fn = collate_fn_seq if seq else collate_fn_point
     dataloader = data.DataLoader(dataset, batch_size=args['batch_size'],
                                  shuffle=True, num_workers=4, collate_fn=collate_fn)

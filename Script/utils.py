@@ -57,7 +57,6 @@ class Evaluate:
         self.evaluate_lens -= 1
 
     def evaluate(self, y_, y, with_loss=False, detail_acc=False):
-        # print(y_)
         loss = self.criterion(y_.view(y.numel(), -1).squeeze(), y.view(-1)) if with_loss else None
         y_, y = [_.detach().cpu().numpy() for _ in [y_, y]]
         if self.mode == 0:  # this case is 0-1 label

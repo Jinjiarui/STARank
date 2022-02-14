@@ -6,9 +6,12 @@ from torch.utils import data
 
 
 class SimpleDataset(data.Dataset):
-    def __init__(self, user_item, mode='train', set_or_seq_len=5, click_model=None):
+    def __init__(self, user_item, mode='train', set_or_seq_len=5, ratio=1.0, click_model=None):
         super(SimpleDataset, self).__init__()
         self.user_log = user_item['log'][:, -4 * set_or_seq_len:]
+        if ratio < 1.0:
+            select_random = np.random.choice(self.user_log.shape[0], int(self.user_log.shape[0] * ratio), replace=False)
+            self.user_log = self.user_log[select_random]
         self.fields_num = user_item['fields']
         self.fields_num_sum = sum(self.fields_num)
         self.set_or_seq_len = set_or_seq_len

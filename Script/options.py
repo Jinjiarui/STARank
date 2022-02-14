@@ -30,6 +30,7 @@ def get_options(parser: ArgumentParser, reset_args=None):
     parser.add_argument('-cm', '--click_model', type=str, choices=['', 'UBM', 'PBM'], default='')
     parser.add_argument('-l', '--loss_type', type=int, choices=[0, 1, 2], default=0,
                         help='0 is BCELoss; 1 is NLLLoss; 2 is PairLoss')
+    parser.add_argument('-r', '--ratio', type=float, default=1.0, help='ratio of datasets used')
     parser.add_argument('--data_dir', type=str, default='./Data')
     parser.add_argument('--save_dir', type=str, default='./SavedModels')
     parser.add_argument('--load_model', action='store_true', default=False)
@@ -44,8 +45,8 @@ def get_options(parser: ArgumentParser, reset_args=None):
 
     args = parser.parse_args().__dict__
     # Get experiment configuration
-    # args['exp_name'] = '_'.join([args['model'], args['dataset'] + args['click_model'], args['postfix']])
-    args['exp_name'] = '_'.join([args['model'], args['dataset'], args['postfix']])
+    args['exp_name'] = '_'.join([args['model'], args['dataset'] + args['click_model'], args['postfix']])
+    # args['exp_name'] = '_'.join([args['model'], args['dataset'], args['postfix']])
 
     args.update(get_exp_configure(args, datasets, models))
 
