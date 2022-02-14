@@ -44,7 +44,8 @@ def get_options(parser: ArgumentParser, reset_args=None):
 
     args = parser.parse_args().__dict__
     # Get experiment configuration
-    args['exp_name'] = '_'.join([args['model'], args['dataset'] + args['click_model'], args['postfix']])
+    # args['exp_name'] = '_'.join([args['model'], args['dataset'] + args['click_model'], args['postfix']])
+    args['exp_name'] = '_'.join([args['model'], args['dataset'], args['postfix']])
 
     args.update(get_exp_configure(args, datasets, models))
 

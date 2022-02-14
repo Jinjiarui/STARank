@@ -56,7 +56,7 @@ class Evaluate:
         self.loc_log = np.expand_dims(self.loc_log, 0)
         self.evaluate_lens -= 1
 
-    def evaluate(self, y_, y, with_loss=False):
+    def evaluate(self, y_, y, with_loss=False, detail_acc=False):
         # print(y_)
         loss = self.criterion(y_.view(y.numel(), -1).squeeze(), y.view(-1)) if with_loss else None
         y_, y = [_.detach().cpu().numpy() for _ in [y_, y]]
@@ -66,6 +66,8 @@ class Evaluate:
             y_ = np.equal(np.argmax(y_, axis=-1), y)
         ndcgs = self.ndcg(y_)
         maps = self.map(y_)
+        if detail_acc:
+            return loss, ndcgs, maps, self.acc(y_)
         return loss, ndcgs, maps
 
     def ndcg(self, label):  # y_ is the relevance
@@ -79,6 +81,10 @@ class Evaluate:
         maps = np.cumsum(maps * self.loc, axis=-1)[:, self.evaluate_lens]
         count = count[:, self.evaluate_lens]
         return np.mean(maps / count, axis=0)
+
+    @staticmethod
+    def acc(label):
+        return np.mean(label, axis=0)
 
 # def evaluate_utils_point(y_, y, criterion=None):
 #     loss = None if criterion is None else criterion(y_, y)
