@@ -20,7 +20,7 @@ class BaseModel(nn.Module):
         self.embedding_layer = nn.Embedding(input_size, embed_size)
 
 
-class PointBaseModel(BaseModel):
+class PointBasedModel(BaseModel):
     def __init__(self,
                  input_size,
                  embed_size,
@@ -29,7 +29,7 @@ class PointBaseModel(BaseModel):
                  dropout_rate=0.5,
                  model_name='PNN',
                  ):
-        super(PointBaseModel, self).__init__(input_size, embed_size, 0, model_name)
+        super(PointBasedModel, self).__init__(input_size, embed_size, 0, model_name)
         self.dropout = nn.Dropout(dropout_rate)
         self.mlp = PredictMLP(embed_size, predict_hidden_sizes, output_size, self.dropout)
         self.requires_mlp = True
@@ -63,7 +63,8 @@ class SeqBasedModel(BaseModel):
         super(SeqBasedModel, self).__init__(input_size, embed_size, hidden_size, model_name)
         self.dropout = nn.Dropout(dropout_rate)
         self.mlp = PredictMLP(hidden_size, predict_hidden_sizes, output_size, self.dropout)
-        self.sub_forward = self.forward_1
+        self.sub_forward = self.forward_2
+        self.requires_mlp = True
         self.use_last = True
         if model_name == 'LSTM':
             self.enc = nn.LSTM(embed_size, hidden_size, batch_first=True)
@@ -74,18 +75,20 @@ class SeqBasedModel(BaseModel):
         elif model_name == 'DIN':
             self.enc = nn.Linear(embed_size, hidden_size)
             self.dec = DIN(embed_size, hidden_size, dropout_rate)
+            self.sub_forward = self.forward_3
         elif model_name == 'DIEN':
             self.enc = nn.GRU(embed_size, hidden_size, batch_first=True)
             self.dec = DIEN(embed_size, hidden_size, batch_first=True)
+            self.sub_forward = self.forward_3
             self.use_last = False
         elif model_name == 'Pointer':
             self.enc = nn.LSTM(embed_size, hidden_size, batch_first=True)
-            self.dec = PointerNetWork(embed_size, hidden_size, hidden_size, self.dropout)
-            self.sub_forward = self.forward_2
+            self.dec = PointerNetWork(embed_size, hidden_size, hidden_size)
+            self.requires_mlp = False
         else:
             raise NotImplemented
 
-    def forward_1(self, history, targets):
+    def forward_1(self, history, targets):  # For All Sequence Model
         history_state = self.enc(history)  # (B, H)
         if isinstance(history_state, tuple):
             history_state = history_state[-1 if self.use_last else 0]
@@ -97,14 +100,32 @@ class SeqBasedModel(BaseModel):
                 target_state, _ = target_state
             target_states.append(target_state.squeeze())
         target_states = torch.stack(target_states, dim=1)  # (B, L, H)
-        target_states = self.mlp(target_states).squeeze()  # (B, L)
-        target_states = torch.sigmoid(target_states)
+        target_states = self.mlp(target_states).squeeze().sigmoid()  # (B, L)
         return target_states
 
-    def forward_2(self, history, targets):
+    def forward_2(self, history, targets):  # For PointerNetwork Or GeneralRNN
         _, history_state = self.enc(history)  # (B, H)
-        history_state = [_.squeeze(0) for _ in history_state]
-        target_states = self.dec(targets, history_state)  # (B, L, L)
+        target_states = self.dec(targets, history_state)  # (B, L, L) or (B, L, H)
+        if self.requires_mlp:
+            if isinstance(target_states, tuple):
+                target_states, _ = target_states
+            target_states = self.mlp(target_states).squeeze().sigmoid()
+        return target_states
+
+    def forward_3(self, history, targets):  # For DIN and DIEN
+        history_state = self.enc(torch.cat([history, targets], 1))  # (B, 2L, H)
+        if isinstance(history_state, tuple):
+            history_state = history_state[-1 if self.use_last else 0]
+        target_states = []
+        L = targets.size(1)
+        for i in range(L):
+            target_state = self.dec(targets[:, i:i + 1], history_state[:, :i + L])  # Input is (B, 1, E)
+            if isinstance(target_state, tuple):
+                target_state, _ = target_state
+            target_states.append(target_state.squeeze())
+        target_states = torch.stack(target_states, dim=1)  # (B, L, H)
+        target_states = self.mlp(target_states).squeeze()  # (B, L)
+        target_states = torch.sigmoid(target_states)
         return target_states
 
     def forward(self, x):

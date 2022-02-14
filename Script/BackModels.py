@@ -115,11 +115,12 @@ class Transformer(nn.Module):
 
 
 class PointerNetWork(nn.Module):
-    def __init__(self, input_size, weight_size, hidden_size, dropout, allow_repeat=False):
+    def __init__(self, input_size, weight_size, hidden_size, allow_repeat=False):
         super(PointerNetWork, self).__init__()
         self.allow_repeat = allow_repeat
 
-        self.enc = nn.Linear(input_size, hidden_size)
+        # self.enc = nn.Linear(input_size, hidden_size)
+        self.enc = nn.LSTM(input_size, hidden_size, batch_first=True)
         self.dec = nn.LSTMCell(input_size, hidden_size)
 
         self.W1 = nn.Linear(hidden_size, weight_size, bias=False)  # blending encoder
@@ -129,7 +130,9 @@ class PointerNetWork(nn.Module):
     def forward(self, targets, history_state):
         # Encoding
         encoder_states = self.enc(targets)  # encoder_state: (B, L, H)
-        hidden = history_state  # (B, H)
+        if isinstance(encoder_states, tuple):
+            encoder_states, _ = encoder_states
+        hidden = [_.squeeze(0) for _ in history_state]  # (B, H)
         blend1 = self.W1(encoder_states)  # (B, L, W)
         # Decoding states initialization
         decoder_input = torch.zeros_like(targets[:, 0])  # (B, I)
@@ -153,7 +156,8 @@ class PointerNetWork(nn.Module):
             out = torch.softmax(out, dim=-1).clamp_min(1e-9)
             decoder_input = targets[a1, torch.argmax(out, dim=-1)]
             probs.append(out)
-        probs = torch.stack(probs, dim=1)  # (B, L, L)
+        probs = torch.stack(probs, dim=1)
+        # (B, L, L), It means the probability of each of these L positions for L items
         return probs
 
 
@@ -168,8 +172,8 @@ class DIN(nn.Module):
                                               nn.Linear(36, 1))
 
     def forward(self, target, histories):  # (B, 1, I), (B, L, H)
-        target = self.ln1(target)
-        target = torch.tile(target, [1, histories.size(-2), 1])  # (B, L, I)
+        target = self.ln1(target)  # (B, 1, H)
+        target = target.expand_as(histories)  # (B, L, H)
         activation_weight = self.activation_layer(torch.concat([histories, target, histories * target], -1))
         histories = torch.sum(histories * activation_weight, dim=1)  # (B, H)
 
@@ -197,7 +201,7 @@ class AUGRUCell(nn.Module):
 
     def forward(self, inputs, h):
         h, = h
-        inputs, attention = inputs[:, :-1], inputs[:, -1:]
+        inputs, attention = inputs[:, :-1], inputs[:, -1:]  # (B, I), (B, 1)
         u = torch.sigmoid(self.dense_layer['xu'](inputs) + self.dense_layer['hu'](h))
         u = u * attention
         r = torch.sigmoid(self.dense_layer['xr'](inputs) + self.dense_layer['hr'](h))
@@ -238,9 +242,8 @@ class DIEN(nn.Module):
 
     def forward(self, targets, history_states):  # (B, 1, I), (B, L, H)
         activation_weight = self.W(targets)  # (B, 1, H)
-        activation_weight = torch.tile(activation_weight, [1, history_states.size(-2), 1])  # (B, L, H)
-        activation_weight = torch.softmax(torch.sum(activation_weight * history_states, -1, keepdim=True),
-                                          1)  # (B, L, 1)
+        activation_weight = torch.softmax(
+            torch.sum(activation_weight * history_states, -1, keepdim=True), 1)  # (B, L, 1)
         history_states = torch.concat([history_states, activation_weight], -1)
         _, (h,) = self.au_gru(history_states)
         return self.ln2(torch.cat([h, targets[:, 0]], dim=-1))

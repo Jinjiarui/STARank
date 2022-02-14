@@ -3,7 +3,7 @@ import random
 import numpy as np
 import torch
 
-from Script.PredictModel import SeqBasedModel, PointBaseModel
+from Script.PredictModel import SeqBasedModel, PointBasedModel
 
 
 def set_random_seed(seed):
@@ -29,7 +29,7 @@ def load_model(args):
             model_name=args['model']
         )
     elif args['model'] in ['FM', 'DeepFM', 'PNN']:
-        model = PointBaseModel(
+        model = PointBasedModel(
             input_size=args['input_size'],
             embed_size=args['embed_size'],
             predict_hidden_sizes=args['predict_hidden_sizes'],
