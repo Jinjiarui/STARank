@@ -28,7 +28,7 @@ def main(args: dict):
     # Create Dataset
     user_item = np.load(os.path.join(args['data_dir'], args['dataset'], 'user_item.npz'))
     click_model = None
-    if args['click_model'] != 'none':
+    if args['click_model'] != '':
         click_model = np.load(os.path.join(args['data_dir'], 'ClickModel', '{}.npy'.format(args['click_model'])))
     dataset = SimpleDataset(user_item, mode='train', click_model=click_model)
     collate_fn = collate_fn_seq if seq else collate_fn_point

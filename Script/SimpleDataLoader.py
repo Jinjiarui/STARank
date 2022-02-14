@@ -45,6 +45,7 @@ def collate_fn_point(data_):
 def collate_fn_seq(data_):
     logs, labels = collate_fn_point(data_)
     # random_seq = torch.argsort(torch.rand(labels.shape), -1)
+    # random_seq = torch.argsort(labels)
     # labels = torch.gather(labels, 1, random_seq)
     # logs[:, labels.size(1):] = torch.gather(logs[:, labels.size(1):], 1,
     #                                         random_seq.unsqueeze(-1).expand(-1, -1, logs.size(-1)))
@@ -56,7 +57,7 @@ if __name__ == '__main__':
     import os
 
     dataset = '../Data/alipay'
-    click_model = np.load('../Data/ClickModel/UBM.npy')
+    click_model = np.load('../Data/ClickModel/PBM.npy')
     train_data = SimpleDataset(np.load(os.path.join(dataset, 'user_item.npz')), mode='train', click_model=click_model)
     train_dataloader = data.DataLoader(train_data, batch_size=20,
                                        num_workers=4, shuffle=True)

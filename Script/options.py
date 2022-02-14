@@ -27,7 +27,7 @@ def get_options(parser: ArgumentParser, reset_args=None):
     models = ['LSTM', 'GRU', 'DIN', 'DIEN', 'Pointer', 'FM', 'DeepFM', 'PNN']
     parser.add_argument('-d', '--dataset', type=str, choices=datasets, default='tmall', help='Dataset use')
     parser.add_argument('-m', '--model', type=str, choices=models, default='LSTM', help='Model use')
-    parser.add_argument('-cm', '--click_model', type=str, choices=['none', 'UBM', 'PBM'], default='none')
+    parser.add_argument('-cm', '--click_model', type=str, choices=['', 'UBM', 'PBM'], default='')
     parser.add_argument('-l', '--loss_type', type=int, choices=[0, 1, 2], default=0,
                         help='0 is BCELoss; 1 is NLLLoss; 2 is PairLoss')
     parser.add_argument('--data_dir', type=str, default='./Data')
@@ -44,7 +44,8 @@ def get_options(parser: ArgumentParser, reset_args=None):
 
     args = parser.parse_args().__dict__
     # Get experiment configuration
-    args['exp_name'] = '_'.join([args['model'], args['dataset'], args['postfix']])
+    args['exp_name'] = '_'.join([args['model'], args['dataset'] + args['click_model'], args['postfix']])
+
     args.update(get_exp_configure(args, datasets, models))
 
     device_name = 'cpu' if args['cuda'] < 0 else 'cuda:{}'.format(args['cuda'])

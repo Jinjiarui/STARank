@@ -93,25 +93,25 @@ class FeedForward(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, input_size, hidden_size, dropout_rate, head=1, b=1, batch_first=True):
+    def __init__(self, input_size, hidden_size, dropout_rate, head=1, b=1, batch_first=True, use_mask=True):
         super(Transformer, self).__init__()
         self.fc = nn.Linear(input_size, hidden_size)
         self.SAs = nn.ModuleList([MultiHeadedAttention(head, hidden_size, dropout_rate) for _ in range(b)])
         self.FFNs = nn.ModuleList([FeedForward(head, hidden_size, dropout_rate) for _ in range(b)])
         self.b = b
         self.batch_first = batch_first
+        self.use_mask = use_mask
 
-    def forward(self, inputs, label_len):
-        inputs = rnn_utils.PackedSequence(self.fc(inputs.data), inputs.batch_sizes)
-        inputs, real_len = rnn_utils.pad_packed_sequence(inputs, batch_first=self.batch_first)
-        batch_size = inputs.size(0)
-        max_len = torch.max(real_len)
-        transformer_mask = torch.tril(torch.ones((1, max_len, max_len), device=inputs.device))
-        out_mask = get_output_mask(real_len, label_len)
+    def forward(self, inputs):
+        inputs = self.fc(inputs)
+        max_len = inputs.size(1)
+        transformer_mask = None
+        if self.use_mask:
+            transformer_mask = torch.tril(torch.ones((1, max_len, max_len), device=inputs.device))
         for i in range(self.b):
             inputs = self.SAs[i](inputs, inputs, inputs, transformer_mask)
             inputs = self.FFNs[i](inputs, transformer_mask)
-        return inputs[out_mask].view((batch_size, label_len, -1))
+        return inputs
 
 
 class PointerNetWork(nn.Module):
@@ -119,8 +119,9 @@ class PointerNetWork(nn.Module):
         super(PointerNetWork, self).__init__()
         self.allow_repeat = allow_repeat
 
-        # self.enc = nn.Linear(input_size, hidden_size)
-        self.enc = nn.LSTM(input_size, hidden_size, batch_first=True)
+        # self.enc = PredictMLP(input_size, [input_size, input_size], hidden_size, nn.Dropout(0.5))
+        # self.enc = nn.LSTM(input_size, hidden_size, batch_first=True)
+        self.enc = Transformer(input_size, hidden_size, 0.5, 2, 2, use_mask=True)
         self.dec = nn.LSTMCell(input_size, hidden_size)
 
         self.W1 = nn.Linear(hidden_size, weight_size, bias=False)  # blending encoder
