@@ -1,31 +1,54 @@
+from typing import List, Optional, Callable
+
 import math
 
 import torch
 import torch.nn as nn
-import torch.nn.utils.rnn as rnn_utils
+from torch import Tensor
 
 
-class PredictMLP(nn.Module):
-    def __init__(self, input_size, predict_hidden_sizes, output_size, dropout):
-        super(PredictMLP, self).__init__()
-        self.dropout = dropout
-        self.activate = nn.LeakyReLU()
+class MLP(nn.Sequential):
+    def __init__(self,
+                 in_channels: int,
+                 hidden_channels: List[int],
+                 norm_layer: Optional[Callable[..., nn.Module]] = None,
+                 activation_layer: Optional[Callable[..., nn.Module]] = nn.LeakyReLU,
+                 bias: bool = True,
+                 dropout: float = 0.0,
+                 for_pre=True):
 
-        self.linear_layers = nn.Sequential(
-            self.dropout,
-            nn.Linear(input_size, predict_hidden_sizes[0]),
-            self.activate)
-        for i in range(1, len(predict_hidden_sizes)):
-            self.linear_layers.add_module('{}_dropout'.format(i), self.dropout)
-            self.linear_layers.add_module('{}_linear'.format(i),
-                                          nn.Linear(predict_hidden_sizes[i - 1], predict_hidden_sizes[i]))
-            self.linear_layers.add_module('{}_activate'.format(i), self.activate)
-        self.fc = nn.Linear(predict_hidden_sizes[-1], output_size)
+        layers = []
+        in_dim = in_channels
+        for hidden_dim in hidden_channels[:-1]:
+            layers.append(nn.Linear(in_dim, hidden_dim, bias=bias))
+            if norm_layer is not None:
+                layers.append(norm_layer(hidden_dim))
+            layers.append(activation_layer())
+            layers.append(nn.Dropout(dropout))
+            in_dim = hidden_dim
+        layers.append(nn.Linear(in_dim, hidden_channels[-1], bias=bias))
+        if not for_pre:
+            if norm_layer is not None:
+                layers.append(norm_layer(hidden_channels[-1]))
+            layers.append(activation_layer())
+            layers.append(nn.Dropout(dropout))
+
+        super().__init__(*layers)
+
+
+class BatchNormTrans(nn.BatchNorm1d):
+    def forward(self, x: Tensor) -> Tensor:
+        # x: (B, L, C), C is the number of features we want to norm
+        return super().forward(x.transpose(1, 2)).transpose(1, 2)
+
+
+class MySparseEmbedding(nn.Module):
+    def __init__(self, fields_num, embed_size):
+        super().__init__()
+        self.w = nn.Parameter(torch.randn(fields_num, embed_size))
 
     def forward(self, x):
-        x = self.linear_layers(x)
-        x = self.fc(x)
-        return x
+        return x.unsqueeze(-1) * self.w.view(*(1,) * (len(x.shape) - 2), *self.w.shape)
 
 
 def get_output_mask(real_len, label_len):
@@ -45,17 +68,16 @@ class MultiHeadedAttention(nn.Module):
     def __init__(self, head, input_size, dropout_rate):
         super(MultiHeadedAttention, self).__init__()
         assert input_size % head == 0
-        self.d_k = input_size // head
+        self.d_k = math.sqrt(input_size // head)
         self.head = head
-        self.linears = nn.ModuleList([nn.Linear(input_size, input_size) for _ in range(4)])
-        self.attn = None
+        self.linear_s = nn.ModuleList(
+            [nn.Linear(input_size, input_size) for _ in range(4)])
         self.dropout = nn.Dropout(dropout_rate)
 
     def attention(self, query, key, value, mask=None, dropout=None):
-        d_k = query.size(-1)
-        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+        scores = torch.div(torch.matmul(query, key.transpose(-2, -1)), self.d_k)
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
+            scores = scores.masked_fill(torch.logical_not(mask), -1e9)
         p_attn = torch.softmax(scores, dim=-1)
         if dropout is not None:
             p_attn = dropout(p_attn)
@@ -64,19 +86,20 @@ class MultiHeadedAttention(nn.Module):
     def forward(self, query, key, value, mask=None):
         if mask is not None:
             mask = mask.unsqueeze(1)
-        batch_size = query.size(0)
+        batch_size = query.shape[0]
         query, key, value = [l(x).view(batch_size, -1, self.head, self.d_k).transpose(1, 2)
-                             for l, x in zip(self.linears, (query, key, value))]
-        x, self.attn = self.attention(query, key, value, mask, None)
-        x = x.transpose(1, 2).contiguous().view(batch_size, -1, self.head * self.d_k)
-        return self.linears[-1](x)
+                             for l, x in zip(self.linear_s, (query, key, value))]
+        x, _ = self.attention(query, key, value, mask, None)
+        x = x.transpose(1, 2).contiguous().view(batch_size, x.shape[2], -1)
+        return self.linear_s[-1](x)
 
 
 class FeedForward(nn.Module):
     def __init__(self, head, input_size, dropout_rate):
         super(FeedForward, self).__init__()
         self.mh = MultiHeadedAttention(head, input_size, dropout_rate)
-        self.dropout = nn.Dropout(dropout_rate)
+        self.dropout1 = nn.Dropout(dropout_rate)
+        self.dropout2 = nn.Dropout(dropout_rate)
         self.activate = nn.LeakyReLU()
         self.ln1 = nn.LayerNorm(input_size)
         self.fc1 = nn.Linear(input_size, input_size)
@@ -84,10 +107,10 @@ class FeedForward(nn.Module):
         self.ln2 = nn.LayerNorm(input_size)
 
     def forward(self, s, mask):
-        s = s + self.dropout(self.mh(s, s, s, mask))
+        s = s + self.dropout1(self.mh(s, s, s, mask))
         s = self.ln1(s)
         s_ = self.activate(self.fc1(s))
-        s_ = self.dropout(self.fc2(s_))
+        s_ = self.dropout2(self.fc2(s_))
         s = self.ln2(s + s_)
         return s
 
@@ -119,9 +142,9 @@ class PointerNetWork(nn.Module):
         super(PointerNetWork, self).__init__()
         self.allow_repeat = allow_repeat
 
-        # self.enc = PredictMLP(input_size, [input_size, input_size], hidden_size, nn.Dropout(0.5))
-        # self.enc = nn.LSTM(input_size, hidden_size, batch_first=True)
-        self.enc = Transformer(input_size, hidden_size, 0.5, 2, 2, use_mask=True)
+        # self.enc = MLP(input_size, [hidden_size], for_pre=False)
+        self.enc = nn.LSTM(input_size, hidden_size, batch_first=True)
+        # self.enc = Transformer(input_size, hidden_size, 0.5, 1, 1, use_mask=True)
         self.dec = nn.LSTMCell(input_size, hidden_size)
 
         self.W1 = nn.Linear(hidden_size, weight_size, bias=False)  # blending encoder
@@ -138,16 +161,16 @@ class PointerNetWork(nn.Module):
         # Decoding states initialization
         decoder_input = torch.zeros_like(targets[:, 0])  # (B, I)
         probs = []
-        a1 = torch.arange(targets.size(0))
+        a1 = torch.arange(targets.shape[0])
         selected = torch.zeros_like(targets[:, :, 0], dtype=torch.bool)
-        minimum_fill = torch.zeros_like(selected, dtype=torch.float32) - 1e9
+        minimum_fill = torch.full_like(selected, -1e9, dtype=torch.float32)
         # Decoding
-        for _ in range(targets.size(1)):
+        for _ in range(targets.shape[1]):
             hidden = self.dec(decoder_input, hidden)
             # Compute blended representation at each decoder time step
             blend2 = self.W2(hidden[0])  # (B, W)
-            blend_sum = torch.tanh(blend1 + blend2.unsqueeze(1))  # (B, L, W)
-            out = self.vt(blend_sum).squeeze()  # (B, L)
+            blend_sum = blend1 + blend2.unsqueeze(1)  # (B, L, W)
+            out = self.vt(blend_sum).squeeze(-1)  # (B, L)
             if not self.allow_repeat:
                 out = torch.where(selected, minimum_fill, out)
                 selecting = torch.argmax(out, dim=-1)
@@ -270,7 +293,7 @@ class ContextAttention(nn.Module):
         self.contexts = nn.ModuleList()
         if norm != 'none':
             self.inputs_norms = nn.ModuleList()
-            self.context_norms = nn.ModuelList()
+            self.context_norms = nn.ModuleList()
 
         for i in range(input_layers):
             in_hidden = hidden_size if i > 0 else input_size

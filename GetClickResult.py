@@ -82,7 +82,7 @@ class GetClickResult:
 
 
 if __name__ == '__main__':
-    program = GetClickResult(5)
+    program = GetClickResult(10, data_dir='SlideData')
     # program.generate_PBM()
     # program.generate_UBM()
     program.generate_CCM()

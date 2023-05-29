@@ -25,8 +25,9 @@ def load_model(args):
             hidden_size=args['hidden_size'],
             predict_hidden_sizes=args['predict_hidden_sizes'],
             output_size=args['output_size'],
-            dropout_rate=args['dropout_rate'],
-            model_name=args['model']
+            dropout=args['dropout_rate'],
+            model_name=args['model'],
+            sparse_embedding=args['dataset'] in ('MQ2007',)
         )
     elif args['model'] in ['FM', 'DeepFM', 'PNN']:
         model = PointBasedModel(
@@ -34,8 +35,9 @@ def load_model(args):
             embed_size=args['embed_size'],
             predict_hidden_sizes=args['predict_hidden_sizes'],
             output_size=args['output_size'],
-            dropout_rate=args['dropout_rate'],
-            model_name=args['model']
+            dropout=args['dropout_rate'],
+            model_name=args['model'],
+            sparse_embedding=args['dataset'] in ('MQ2007',)
         )
     else:
         raise NotImplementedError
@@ -47,7 +49,7 @@ class Evaluate:
         self.mode = mode
         self.criterion = criterion
         if evaluate_lens is None:
-            evaluate_lens = [3, 5]
+            evaluate_lens = [5, 10]
         self.evaluate_lens = np.array(evaluate_lens)
         self.loc = 1.0 / (np.arange(max(self.evaluate_lens)) + 1)
         self.loc = np.expand_dims(self.loc, 0)
@@ -57,7 +59,8 @@ class Evaluate:
         self.evaluate_lens -= 1
 
     def evaluate(self, y_, y, with_loss=False, detail_acc=False):
-        loss = self.criterion(y_.view(y.numel(), -1).squeeze(), y.view(-1)) if with_loss else None
+        # loss = self.criterion(y_.view(y.numel(), -1).squeeze(), y.view(-1)) if with_loss else None
+        loss = self.criterion(y_, y) if with_loss else None
         y_, y = [_.detach().cpu().numpy() for _ in [y_, y]]
         if self.mode == 0:  # this case is 0-1 label
             y_ = np.equal(np.argsort(-y_, axis=1), np.argsort(-y, axis=1))
