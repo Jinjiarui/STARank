@@ -1,6 +1,6 @@
 # Set-To-Arrangment Ranking (STARank)
 <p align="center">
-  <img src="image/starank.png" width="600">
+  <img src="image/starank.png" width="900">
   <br />
   <br />
 </p>
